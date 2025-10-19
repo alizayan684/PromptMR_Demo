@@ -300,12 +300,12 @@ with st.sidebar:
         st.button("🚀 Start Reconstruction", use_container_width=True, disabled=True,
                   help="Please upload a k-space file first")
 
-    # ---- NEW: Dynamic display controls ----
+    # ---- Dynamic display controls ----
     st.markdown("---")
     st.markdown("### 🖼 Display Controls (demo mode)")
-    # Universal size
-    img_width = st.slider("Image width (px)", 80, 800, 250, step=10)
-    img_height = st.slider("Image height (px)", 80, 800, 250, step=10)
+    # Universal size control to ensure width and height are the same
+    img_size = st.slider("Image Size (px)", 80, 800, 250, step=10, help="Adjust the width and height of all images.")
+    
     st.markdown("**Per-image offsets (px)**")
     # Per-image top and left offsets
     top_offsets = [
@@ -400,15 +400,41 @@ else:
 
 
 # ---------------------------
-# Helper: convert PIL image to base64 for inline HTML with styles
+# NEW HELPER: Center crop and resize an image to be a square
 # ---------------------------
-def pil_to_base64_html(img_pil, width_px=None, height_px=None, style=""):
+def crop_and_resize(img_pil, size):
+    """Crops the image to a square from the center and resizes it."""
+    img_copy = img_pil.copy()
+    width, height = img_copy.size
+    
+    # Determine the size of the square to crop
+    new_size = min(width, height)
+    
+    # Calculate coordinates for the center crop
+    left = (width - new_size) / 2
+    top = (height - new_size) / 2
+    right = (width + new_size) / 2
+    bottom = (height + new_size) / 2
+    
+    # Crop the image
+    img_cropped = img_copy.crop((left, top, right, bottom))
+    
+    # Resize to the final desired size
+    img_resized = img_cropped.resize((size, size), Image.LANCZOS)
+    
+    return img_resized
+
+
+# ---------------------------
+# MODIFIED HELPER: convert PIL image to base64 for inline HTML with styles
+# ---------------------------
+def pil_to_base64_html(img_pil, size, style=""):
+    """Processes image and converts to a base64 encoded HTML img tag."""
+    # Use the new helper to crop and resize the image
+    img_processed = crop_and_resize(img_pil, size)
+    
     buf = BytesIO()
-    img = img_pil.copy()
-    # resize to requested pixel dims for faster browser rendering (preserve aspect)
-    if width_px and height_px:
-        img.thumbnail((width_px, height_px), Image.LANCZOS)
-    img.save(buf, format="PNG")
+    img_processed.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     style_attr = f'style="{style}"' if style else ""
     return f'<img src="data:image/png;base64,{b64}" {style_attr}/>'
@@ -424,8 +450,8 @@ for idx, img_obj in enumerate(images[:4]):
     left = left_offsets[idx] if idx < len(left_offsets) else 0
     # Inline CSS: margin-top and margin-left in pixels, display inline-block for side-by-side
     style = f"display:inline-block; margin-top:{top}px; margin-left:{left}px; margin-right:20px;"
-    # convert to base64 img tag (thumbnail to requested dimensions)
-    img_tag = pil_to_base64_html(img_obj['image'], width_px=img_width, height_px=img_height, style=style)
+    # Convert to base64 img tag using the MODIFIED helper function
+    img_tag = pil_to_base64_html(img_obj['image'], size=img_size, style=style)
     label_html = f'<div style="text-align:center;font-weight:600;color:#334155;margin-bottom:6px;">🔍 {img_obj["label"]}</div>'
     img_html_parts.append(f'<div style="display:inline-block; vertical-align:top;">{label_html}{img_tag}</div>')
 
@@ -441,7 +467,9 @@ if st.session_state.reconstructed_images:
         if idx < len(images):
             with col:
                 buf = BytesIO()
-                img_data['image'].save(buf, format='PNG')
+                # Also crop and resize the downloadable image for consistency
+                img_to_download = crop_and_resize(img_data['image'], 512) # Download at a fixed higher res
+                img_to_download.save(buf, format='PNG')
                 st.download_button(
                     label=f"⬇️ V{idx + 1}",
                     data=buf.getvalue(),
